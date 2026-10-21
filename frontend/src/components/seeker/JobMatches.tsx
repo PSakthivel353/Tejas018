@@ -1,11 +1,46 @@
 import { BadgeCheck, MapPin } from "lucide-react";
-import { Badge, EmptyState, Skeleton, SkillChip } from "@/components/ui";
-import type { JobMatch } from "@/lib/types";
-import { percent, rupees } from "@/lib/utils";
+import { useState } from "react";
+import { Badge, Button, EmptyState, Notice, Skeleton, SkillChip } from "@/components/ui";
+import type { Candidate, JobMatch, SeekerProfile } from "@/lib/types";
+import { errorMessage, percent, rupees } from "@/lib/utils";
 
-function MatchRow({ job }: { job: JobMatch }) {
+type Props = {
+  jobs: JobMatch[];
+  loading: boolean;
+  radius: number;
+  profile: SeekerProfile | null;
+  applications: Candidate[];
+  onApply: (job: JobMatch) => Promise<void>;
+};
+
+function MatchRow({
+  job,
+  profile,
+  application,
+  onApply,
+}: {
+  job: JobMatch;
+  profile: SeekerProfile | null;
+  application?: Candidate;
+  onApply: (job: JobMatch) => Promise<void>;
+}) {
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const wage =
     job.wage_min && job.wage_max ? `${rupees(job.wage_min)} to ${rupees(job.wage_max)} a month` : null;
+
+  async function apply() {
+    setApplying(true);
+    setError(null);
+    try {
+      await onApply(job);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setApplying(false);
+    }
+  }
+
   return (
     <li className="px-5 py-4">
       <div className="flex items-start justify-between gap-4">
@@ -49,11 +84,33 @@ function MatchRow({ job }: { job: JobMatch }) {
           {job.bridge_course}
         </p>
       )}
+      <div className="mt-4">
+        {application ? (
+          <div className="space-y-2">
+            <Badge tone={application.status === "hired" ? "good" : application.status === "rejected" ? "bad" : "accent"}>
+              {application.status === "hired"
+                ? "Hired - congratulations!"
+                : application.status === "rejected"
+                  ? "Not selected - see your application update"
+                  : "Application submitted"}
+            </Badge>
+          </div>
+        ) : (
+          <Button size="sm" onClick={apply} loading={applying} disabled={!profile}>
+            Apply
+          </Button>
+        )}
+        {error && (
+          <div className="mt-2">
+            <Notice kind="error">{error}</Notice>
+          </div>
+        )}
+      </div>
     </li>
   );
 }
 
-export function JobMatches({ jobs, loading, radius }: { jobs: JobMatch[]; loading: boolean; radius: number }) {
+export function JobMatches({ jobs, loading, radius, profile, applications, onApply }: Props) {
   if (loading) {
     return (
       <div className="space-y-4 p-5" aria-busy="true" aria-label="Finding jobs">
@@ -74,5 +131,17 @@ export function JobMatches({ jobs, loading, radius }: { jobs: JobMatch[]; loadin
       </EmptyState>
     );
   }
-  return <ul className="divide-y divide-line">{jobs.map((j) => <MatchRow key={j.vacancy_id} job={j} />)}</ul>;
+  return (
+    <ul className="divide-y divide-line">
+      {jobs.map((job) => (
+        <MatchRow
+          key={job.vacancy_id}
+          job={job}
+          profile={profile}
+          application={applications.find((item) => item.vacancy_id === job.vacancy_id)}
+          onApply={onApply}
+        />
+      ))}
+    </ul>
+  );
 }

@@ -3,7 +3,7 @@
 import { MapPin } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, CardHeader, EmptyState, Notice, Skeleton, SkillChip } from "@/components/ui";
-import { EMPLOYER_ID, getCandidates, rejectCandidate } from "@/lib/api";
+import { EMPLOYER_ID, getCandidates, hireCandidate, rejectCandidate } from "@/lib/api";
 import type { Candidate, RejectReason } from "@/lib/types";
 import { cn, errorMessage, percent } from "@/lib/utils";
 
@@ -20,12 +20,20 @@ const reasonLabel = (r?: RejectReason | null) => REASONS.find((x) => x.value ===
 // Click 1: "Reject" opens the reasons.  Click 2: pick a reason, and it is saved.
 // The reason is data: the officer dashboard can later show WHY local candidates are turned away.
 
-function RejectControl({ name, onReject }: { name: string; onReject: (reason: RejectReason) => void }) {
+function RejectControl({
+  name,
+  onReject,
+  disabled,
+}: {
+  name: string;
+  onReject: (reason: RejectReason) => void;
+  disabled?: boolean;
+}) {
   const [open, setOpen] = useState(false);
 
   if (!open) {
     return (
-      <Button variant="secondary" size="sm" onClick={() => setOpen(true)} aria-label={`Reject ${name}`}>
+      <Button variant="secondary" size="sm" onClick={() => setOpen(true)} disabled={disabled} aria-label={`Reject ${name}`}>
         Reject
       </Button>
     );
@@ -43,6 +51,7 @@ function RejectControl({ name, onReject }: { name: string; onReject: (reason: Re
           key={r.value}
           type="button"
           autoFocus={i === 0}
+          disabled={disabled}
           onClick={() => {
             setOpen(false);
             onReject(r.value);
@@ -52,7 +61,7 @@ function RejectControl({ name, onReject }: { name: string; onReject: (reason: Re
           {r.label}
         </button>
       ))}
-      <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+      <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={disabled}>
         Cancel
       </Button>
     </div>
@@ -94,7 +103,8 @@ export function CandidateList({ refreshKey }: { refreshKey: number }) {
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [view, setView] = useState<"new" | "rejected">("new");
+  const [view, setView] = useState<"pending" | "hired" | "rejected">("pending");
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -105,38 +115,54 @@ export function CandidateList({ refreshKey }: { refreshKey: number }) {
     }
   }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => void load(), [load, refreshKey]);
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 15000);
+    return () => window.clearInterval(timer);
+  }, [load, refreshKey]);
 
-  async function reject(candidate: Candidate, reason: RejectReason) {
+  async function updateApplication(candidate: Candidate, update: () => Promise<Candidate>) {
+    if (updatingId !== null) return;
     setActionError(null);
+    setUpdatingId(candidate.application_id);
     const previous = candidates;
-    // Update the screen first so it feels instant, undo if the server says no.
-    setCandidates((list) =>
-      list ? list.map((c) => (c.application_id === candidate.application_id ? { ...c, status: "rejected", reject_reason: reason } : c)) : list,
-    );
     try {
-      await rejectCandidate(candidate.application_id, reason);
+      const updated = await update();
+      setCandidates((list) =>
+        list ? list.map((c) => (c.application_id === candidate.application_id ? updated : c)) : list,
+      );
     } catch (e) {
       setCandidates(previous);
-      setActionError(`Could not reject ${candidate.name}. ${errorMessage(e)}`);
+      setActionError(`Could not update ${candidate.name}'s application. ${errorMessage(e)}`);
+    } finally {
+      setUpdatingId(null);
     }
   }
 
+  function reject(candidate: Candidate, reason: RejectReason) {
+    void updateApplication(candidate, () => rejectCandidate(candidate.application_id, reason));
+  }
+
+  function hire(candidate: Candidate) {
+    void updateApplication(candidate, () => hireCandidate(candidate.application_id));
+  }
+
   const shown = useMemo(
-    () => (candidates ?? []).filter((c) => (view === "new" ? c.status !== "rejected" : c.status === "rejected")),
+    () => (candidates ?? []).filter((c) => c.status === view),
     [candidates, view],
   );
   const rejectedCount = (candidates ?? []).filter((c) => c.status === "rejected").length;
+  const pendingCount = (candidates ?? []).filter((c) => c.status === "pending").length;
+  const hiredCount = (candidates ?? []).filter((c) => c.status === "hired").length;
 
   return (
     <Card className="self-start">
-      <CardHeader title="Candidates" description="People whose skills and location fit your vacancies, best match first." />
+      <CardHeader title="Applications" description="Review submitted applications and decide whether to hire or reject each person." />
 
       {candidates && <RejectionTracker candidates={candidates} />}
 
-      <div className="flex gap-1 border-b border-line px-5 py-2" role="group" aria-label="Show candidates">
-        {(["new", "rejected"] as const).map((v) => (
+      <div className="flex flex-wrap gap-1 border-b border-line px-5 py-2" role="group" aria-label="Filter applications">
+        {(["pending", "hired", "rejected"] as const).map((v) => (
           <button
             key={v}
             type="button"
@@ -147,7 +173,7 @@ export function CandidateList({ refreshKey }: { refreshKey: number }) {
               view === v ? "bg-accent-soft font-semibold text-accent" : "text-muted hover:bg-sunken hover:text-ink",
             )}
           >
-            {v === "new" ? `Active (${(candidates?.length ?? 0) - rejectedCount})` : `Rejected (${rejectedCount})`}
+            {v === "pending" ? `Pending (${pendingCount})` : v === "hired" ? `Hired (${hiredCount})` : `Rejected (${rejectedCount})`}
           </button>
         ))}
       </div>
@@ -172,8 +198,8 @@ export function CandidateList({ refreshKey }: { refreshKey: number }) {
           ))}
         </div>
       ) : shown.length === 0 ? (
-        <EmptyState title={view === "new" ? "No active candidates" : "No one rejected yet"}>
-          {view === "new" ? "Post a vacancy and matching candidates will appear here." : "Rejected candidates and their reasons show up here."}
+        <EmptyState title={`No ${view} applications`}>
+          Applications submitted by job seekers will appear here.
         </EmptyState>
       ) : (
         <ul className="divide-y divide-line">
@@ -188,6 +214,9 @@ export function CandidateList({ refreshKey }: { refreshKey: number }) {
                       <MapPin size={13} aria-hidden /> {c.distance_km.toFixed(1)} km
                     </span>
                   </p>
+                  <p className="mt-1 text-sm">
+                    Applied for <span className="font-medium">{c.job_title}</span> at {c.employer}
+                  </p>
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="font-display text-xl font-bold leading-none text-accent">{percent(c.score)}</p>
@@ -200,10 +229,43 @@ export function CandidateList({ refreshKey }: { refreshKey: number }) {
                 ))}
               </div>
               <div className="mt-3">
-                {c.status === "rejected" ? (
-                  <Badge tone="bad">Rejected: {reasonLabel(c.reject_reason)}</Badge>
+                {c.status === "pending" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => void hire(c)}
+                      loading={updatingId === c.application_id}
+                      disabled={updatingId !== null && updatingId !== c.application_id}
+                    >
+                      Hire
+                    </Button>
+                    <RejectControl
+                      name={c.name}
+                      onReject={(reason) => reject(c, reason)}
+                      disabled={updatingId !== null}
+                    />
+                  </div>
+                ) : c.status === "rejected" ? (
+                  <div className="space-y-2">
+                    <Badge tone="bad">Rejected: {reasonLabel(c.reject_reason)}</Badge>
+                    {c.missing_skills.length > 0 && (
+                      <div>
+                        <p className="mb-1 text-xs text-muted">Skills to develop</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {c.missing_skills.map((skill) => <SkillChip key={skill} missing>{skill}</SkillChip>)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ) : (
-                  <RejectControl name={c.name} onReject={(reason) => reject(c, reason)} />
+                  <div className="space-y-2">
+                    <Badge tone="good">Hired</Badge>
+                    {c.interview_at && (
+                      <p className="text-sm text-muted">
+                        Interview scheduled: {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(c.interview_at))}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </li>

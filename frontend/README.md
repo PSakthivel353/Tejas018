@@ -5,8 +5,8 @@ Next.js 14 (App Router) + Tailwind CSS + Recharts. Three portals, light and dark
 | Route | Portal | What is in it |
 | --- | --- | --- |
 | `/` | Home | Three doors into the portals |
-| `/seeker` | Job seeker | PDF CV uploader, progress bar, ranked job matches, distance filter |
-| `/employer` | Employer | Job posting form, candidate list, 2-click rejection tracker |
+| `/seeker` | Job seeker | PDF CV uploader, progress bar, ranked job matches, apply button, and application decisions |
+| `/employer` | Employer | Job posting form, submitted applications, and hire/reject decisions |
 | `/officer` | District officer | Stats, Recharts heatmap, Skill Gap Score chart, 1-click DSDP export |
 
 ## 1. Where to place it
@@ -98,9 +98,12 @@ Send this table to Member 3. Every path below is called through `lib/api.ts`.
 | --- | --- | --- |
 | `POST /seekers/cv` | multipart form, field name `file` (a PDF) | `{seeker_id, name, trade_id, detected_trade, skills[], confidence}` |
 | `POST /jobs/match` | `{trade_id, skills[], lat, lon, radius_km}` | list of `{vacancy_id, title, employer, score, distance_km, is_formal, wage_min, wage_max, matched_skills[], missing_skills[], bridge_course}` |
+| `POST /applications` | `{seeker_id, vacancy_id}` | application record including applicant/job details and `status: "pending"` |
+| `GET /seekers/{id}/applications` | none | list of the seeker's applications and their latest decisions |
 | `POST /employers/vacancies` | `{employer_id, employer_name, title, description, openings, wage_min, wage_max, is_formal, location}` | `{vacancy_id, detected_trade, skills[], confidence, sgs_before, sgs_after}` |
-| `GET /employers/{id}/candidates` | none | list of `{application_id, name, trade, score, distance_km, skills[], status: "new" or "rejected", reject_reason}` |
-| `PATCH /applications/{id}/reject` | `{reason}`: `skills_mismatch`, `too_far`, `salary_expectation`, `experience`, `other` | anything with status 200 |
+| `GET /employers/{id}/candidates` | none | submitted applications with applicant skills, matched job, missing skills, and status |
+| `PATCH /applications/{id}/hire` | `{}` | updated application with `status: "hired"` and `interview_at` (ISO-8601 date/time) |
+| `PATCH /applications/{id}/reject` | `{reason}`: `skills_mismatch`, `too_far`, `salary_expectation`, `experience`, `other` | updated application with `status: "rejected"` |
 | `GET /district/summary` | none | `{district, trades, itis, employers, open_vacancies}` |
 | `GET /trades` | none | list of `{trade_id, trade, projected_demand, expected_graduates, sgs, label, seats_to_add, employers_hiring, recommendation}` |
 | `GET /district/heatmap` | none | `{months[], trades[], cells: [{trade, month, value}]}` (value = projected openings) |
@@ -113,7 +116,7 @@ Rules that keep the frontend and backend friendly:
 3. **404 and 5xx mean "not built / down"** to the frontend, which then switches that one endpoint to demo data. Do not return 404 for "this record does not exist"; use 400.
 4. Field names must match `src/lib/types.ts`. If the backend's names differ, change `types.ts` (and `mock.ts`) in one place.
 
-`tools/stub_backend.py` is a working example of all nine routes. To try the frontend against it:
+`tools/stub_backend.py` is a working example of the routes above. To try the frontend against it:
 
 ```bash
 pip install fastapi "uvicorn[standard]" python-multipart
@@ -137,8 +140,10 @@ uvicorn tools.stub_backend:app --port 8000      # run from the frontend/ folder
 - There is **no login**. The Employer portal acts as employer `NEXT_PUBLIC_EMPLOYER_ID` (default 1).
 - The heatmap reads a new endpoint, `GET /district/heatmap`. If Member 3 prefers per-trade forecasts, only
   `getHeatmap()` in `lib/api.ts` changes.
-- The **2 clicks** are: Reject, then pick a reason. The reason is stored, so the officer dashboard can later
-  show why local candidates are turned away.
+- Employer decisions are stored on each application. Seekers see a hire confirmation or, after rejection,
+  the missing skills and suggested bridge course for that job.
+- Rejection still takes two clicks: Reject, then pick a reason. The reason is stored, so the officer dashboard
+  can later show why local candidates are turned away.
 - Demo numbers (for example "Add 40 seats in CNC Operation") are invented for the demo, see `lib/mock.ts`.
 - Recharts 2.x is used (it prints a "deprecated" notice on install; it is stable and works with React 18).
 

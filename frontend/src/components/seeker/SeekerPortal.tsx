@@ -1,12 +1,13 @@
 "use client";
 
 import { Check, Circle } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CvUploader } from "./CvUploader";
+import { ApplicationUpdates } from "./ApplicationUpdates";
 import { JobMatches } from "./JobMatches";
 import { Badge, Card, CardHeader, Notice, ProgressBar, SkillChip, inputClass } from "@/components/ui";
-import { DISTRICT_LAT, DISTRICT_LON, matchJobs, uploadCv } from "@/lib/api";
-import type { JobMatch, SeekerProfile } from "@/lib/types";
+import { applyToJob, DISTRICT_LAT, DISTRICT_LON, getSeekerApplications, matchJobs, uploadCv } from "@/lib/api";
+import type { Candidate, JobMatch, SeekerProfile } from "@/lib/types";
 import { cn, errorMessage, percent } from "@/lib/utils";
 
 type Stage = "idle" | "uploading" | "matching" | "done" | "error";
@@ -19,30 +20,117 @@ export function SeekerPortal() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [profile, setProfile] = useState<SeekerProfile | null>(null);
   const [jobs, setJobs] = useState<JobMatch[]>([]);
+  const [applications, setApplications] = useState<Candidate[]>([]);
+  const [applicationsError, setApplicationsError] = useState<string | null>(null);
   const [radius, setRadius] = useState(40);
   const [rematching, setRematching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const find = (p: SeekerProfile, radius_km: number) =>
-    matchJobs({ trade_id: p.trade_id, skills: p.skills, lat: DISTRICT_LAT, lon: DISTRICT_LON, radius_km });
+  const find = useCallback(
+    (p: SeekerProfile, radius_km: number) =>
+      matchJobs({ trade_id: p.trade_id, skills: p.skills, lat: DISTRICT_LAT, lon: DISTRICT_LON, radius_km }),
+    [],
+  );
+
+  const refreshApplications = useCallback(async (seekerId: number) => {
+    try {
+      setApplications(await getSeekerApplications(seekerId));
+      setApplicationsError(null);
+    } catch (e) {
+      setApplicationsError(errorMessage(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    let saved: string | null;
+    try {
+      saved = window.sessionStorage.getItem("skillbridge.seekerProfile");
+    } catch (e) {
+      setApplicationsError(`Could not restore your saved profile. ${errorMessage(e)}`);
+      return;
+    }
+    if (!saved) return;
+    let restored: SeekerProfile;
+    try {
+      restored = JSON.parse(saved) as SeekerProfile;
+      if (!Number.isFinite(restored.seeker_id) || !Array.isArray(restored.skills)) {
+        throw new Error("Saved profile is incomplete. Upload your CV again.");
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+      setStage("error");
+      return;
+    }
+
+    setProfile(restored);
+    setStage("matching");
+    Promise.allSettled([find(restored, radius), getSeekerApplications(restored.seeker_id)])
+      .then(([matchesResult, applicationsResult]) => {
+        if (applicationsResult.status === "fulfilled") {
+          setApplications(applicationsResult.value);
+          setApplicationsError(null);
+        } else {
+          setApplicationsError(errorMessage(applicationsResult.reason));
+        }
+        if (matchesResult.status === "rejected") {
+          throw matchesResult.reason;
+        }
+        setJobs(matchesResult.value);
+        setStage("done");
+      })
+      .catch((e: unknown) => {
+        setError(errorMessage(e));
+        setStage("error");
+      });
+  }, [find, radius]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const timer = window.setInterval(() => void refreshApplications(profile.seeker_id), 15000);
+    return () => window.clearInterval(timer);
+  }, [profile, refreshApplications]);
 
   async function handleFile(file: File) {
     setError(null);
     setProfile(null);
     setJobs([]);
+    setApplications([]);
+    setApplicationsError(null);
     setFileName(file.name);
     setUploadPct(0);
     setStage("uploading");
     try {
+      window.sessionStorage.removeItem("skillbridge.seekerProfile");
+    } catch {
+      setApplicationsError("The previous profile could not be cleared from this browser session.");
+    }
+    try {
       const p = await uploadCv(file, setUploadPct);
       setProfile(p);
+      let profileSaveError: string | null = null;
+      try {
+        window.sessionStorage.setItem("skillbridge.seekerProfile", JSON.stringify(p));
+      } catch {
+        profileSaveError = "Your profile could not be saved for this browser session. Upload your CV again if you leave this page.";
+      }
       setStage("matching");
       setJobs(await find(p, radius));
+      await refreshApplications(p.seeker_id);
+      if (profileSaveError) setApplicationsError(profileSaveError);
       setStage("done");
     } catch (e) {
       setError(errorMessage(e));
       setStage("error");
     }
+  }
+
+  async function apply(job: JobMatch) {
+    if (!profile) return;
+    const application = await applyToJob(profile, job);
+    setApplications((current) => [
+      ...current.filter((item) => item.application_id !== application.application_id),
+      application,
+    ]);
   }
 
   async function changeRadius(next: number) {
@@ -134,39 +222,56 @@ export function SeekerPortal() {
         )}
       </div>
 
-      <Card className="self-start">
-        <CardHeader
-          title="Jobs near you"
-          description="Ranked by how well your skills fit and how close the job is."
-          action={
-            <div className="shrink-0">
-              <label htmlFor="radius" className="sr-only">
-                Distance
-              </label>
-              <select
-                id="radius"
-                value={radius}
-                onChange={(e) => changeRadius(Number(e.target.value))}
-                disabled={busy || rematching}
-                className={cn(inputClass, "w-auto py-1.5")}
-              >
-                {RADII.map((r) => (
-                  <option key={r} value={r}>
-                    Within {r} km
-                  </option>
-                ))}
-              </select>
-            </div>
-          }
-        />
-        {stage === "idle" ? (
-          <p className="px-5 py-10 text-center text-sm text-muted">Upload your CV to see openings that fit your trade.</p>
-        ) : stage === "error" ? (
-          <p className="px-5 py-10 text-center text-sm text-muted">Fix the problem on the left, then upload again.</p>
-        ) : (
-          <JobMatches jobs={jobs} loading={stage === "uploading" || stage === "matching" || rematching} radius={radius} />
-        )}
-      </Card>
+      <div className="space-y-6 self-start">
+        <Card>
+          <CardHeader
+            title="Jobs near you"
+            description="Ranked by how well your skills fit and how close the job is."
+            action={
+              <div className="shrink-0">
+                <label htmlFor="radius" className="sr-only">
+                  Distance
+                </label>
+                <select
+                  id="radius"
+                  value={radius}
+                  onChange={(e) => changeRadius(Number(e.target.value))}
+                  disabled={busy || rematching}
+                  className={cn(inputClass, "w-auto py-1.5")}
+                >
+                  {RADII.map((r) => (
+                    <option key={r} value={r}>
+                      Within {r} km
+                    </option>
+                  ))}
+                </select>
+              </div>
+            }
+          />
+          {stage === "idle" ? (
+            <p className="px-5 py-10 text-center text-sm text-muted">Upload your CV to see openings that fit your trade.</p>
+          ) : stage === "error" ? (
+            <p className="px-5 py-10 text-center text-sm text-muted">Fix the problem on the left, then upload again.</p>
+          ) : (
+            <>
+              {applicationsError && (
+                <div className="px-5 pt-4">
+                  <Notice kind="error">{applicationsError}</Notice>
+                </div>
+              )}
+              <JobMatches
+                jobs={jobs}
+                loading={stage === "uploading" || stage === "matching" || rematching}
+                radius={radius}
+                profile={profile}
+                applications={applications}
+                onApply={apply}
+              />
+            </>
+          )}
+        </Card>
+        <ApplicationUpdates applications={applications} />
+      </div>
     </div>
   );
 }
