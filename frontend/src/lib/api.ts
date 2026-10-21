@@ -7,13 +7,17 @@
 
 import {
   DISTRICT,
-  MOCK_CANDIDATES,
   MOCK_MATCHES,
   MOCK_SUMMARY,
   MOCK_TRADES,
+  mockApplicationsForSeeker,
+  mockCandidatesForEmployer,
   mockDsdpCsv,
+  mockHireApplication,
   mockHeatmap,
   mockProfile,
+  mockRejectApplication,
+  mockSubmitApplication,
   mockVacancyResult,
 } from "./mock";
 import { markSource } from "./status";
@@ -144,6 +148,26 @@ export function matchJobs(req: MatchRequest): Promise<JobMatch[]> {
   );
 }
 
+/** POST /applications -> the submitted application record */
+export function applyToJob(seeker: SeekerProfile, job: JobMatch): Promise<Candidate> {
+  return call(
+    "POST /applications",
+    "/applications",
+    jsonInit("POST", { seeker_id: seeker.seeker_id, vacancy_id: job.vacancy_id }),
+    () => mockSubmitApplication(seeker, job),
+  );
+}
+
+/** GET /seekers/{id}/applications -> applications and their latest decisions */
+export function getSeekerApplications(seekerId: number): Promise<Candidate[]> {
+  return call(
+    "GET /seekers/{id}/applications",
+    `/seekers/${seekerId}/applications`,
+    undefined,
+    () => mockApplicationsForSeeker(seekerId),
+  );
+}
+
 // ---- Employer ----------------------------------------------------------------------------------------
 
 /** POST /employers/vacancies  ->  VacancyResult */
@@ -159,17 +183,27 @@ export function getCandidates(employerId: number): Promise<Candidate[]> {
     "GET /employers/{id}/candidates",
     `/employers/${employerId}/candidates`,
     undefined,
-    () => MOCK_CANDIDATES.map((c) => ({ ...c })),
+    mockCandidatesForEmployer,
   );
 }
 
-/** PATCH /applications/{id}/reject  body {reason}  ->  anything (we only check it succeeded) */
-export function rejectCandidate(applicationId: number, reason: RejectReason): Promise<unknown> {
+/** PATCH /applications/{id}/hire -> the updated application */
+export function hireCandidate(applicationId: number): Promise<Candidate> {
+  return call(
+    "PATCH /applications/{id}/hire",
+    `/applications/${applicationId}/hire`,
+    jsonInit("PATCH", {}),
+    () => mockHireApplication(applicationId),
+  );
+}
+
+/** PATCH /applications/{id}/reject body {reason} -> the updated application */
+export function rejectCandidate(applicationId: number, reason: RejectReason): Promise<Candidate> {
   return call(
     "PATCH /applications/{id}/reject",
     `/applications/${applicationId}/reject`,
     jsonInit("PATCH", { reason }),
-    () => ({ application_id: applicationId, status: "rejected", reason }),
+    () => mockRejectApplication(applicationId, reason),
   );
 }
 

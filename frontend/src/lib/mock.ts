@@ -183,13 +183,108 @@ export function mockVacancyResult(input: VacancyInput): VacancyResult {
 }
 
 export const MOCK_CANDIDATES: Candidate[] = [
-  { application_id: 1, name: "Arun Kumar", trade: "CNC Operation", score: 0.91, distance_km: 6.2, skills: ["G-code programming", "Lathe operation"], status: "new" },
-  { application_id: 2, name: "Divya Sundar", trade: "CNC Operation", score: 0.84, distance_km: 14.8, skills: ["Tool offset setting", "Blueprint reading"], status: "new" },
-  { application_id: 3, name: "Mohammed Rafi", trade: "Turner", score: 0.77, distance_km: 22.5, skills: ["Lathe operation", "Micrometer and vernier use"], status: "new" },
-  { application_id: 4, name: "Lakshmi Priya", trade: "Fitter", score: 0.69, distance_km: 31.0, skills: ["Blueprint reading"], status: "new" },
-  { application_id: 5, name: "Karthik Velu", trade: "CNC Operation", score: 0.66, distance_km: 9.4, skills: ["Lathe operation"], status: "new" },
-  { application_id: 6, name: "Nisha Thomas", trade: "Welder", score: 0.52, distance_km: 41.6, skills: ["Arc welding"], status: "new" },
+  // Employer applications are populated by mockSubmitApplication, not by unrelated sample candidates.
 ];
+
+let mockApplications: Candidate[] | null = null;
+
+function getMockApplications(): Candidate[] {
+  if (mockApplications) return mockApplications;
+  const saved = typeof window === "undefined" ? null : window.sessionStorage.getItem("skillbridge.mockApplications");
+  if (!saved) {
+    mockApplications = [];
+    return mockApplications;
+  }
+  const parsed: unknown = JSON.parse(saved);
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every(
+      (application) =>
+        typeof application.application_id === "number" &&
+        typeof application.seeker_id === "number" &&
+        typeof application.vacancy_id === "number" &&
+        ["pending", "hired", "rejected"].includes(application.status),
+    )
+  ) {
+    throw new Error("Saved demo applications could not be read. Clear this tab's session data and try again.");
+  }
+  mockApplications = parsed as Candidate[];
+  return mockApplications;
+}
+
+function saveMockApplications(applications: Candidate[]) {
+  if (typeof window !== "undefined") {
+    window.sessionStorage.setItem("skillbridge.mockApplications", JSON.stringify(applications));
+  }
+  mockApplications = applications;
+}
+
+export function mockSubmitApplication(
+  seeker: SeekerProfile,
+  job: JobMatch,
+): Candidate {
+  const applications = getMockApplications();
+  const existing = applications.find(
+    (application) => application.seeker_id === seeker.seeker_id && application.vacancy_id === job.vacancy_id,
+  );
+  if (existing) return { ...existing };
+
+  const application: Candidate = {
+    application_id: Math.max(0, ...applications.map((application) => application.application_id)) + 1,
+    seeker_id: seeker.seeker_id,
+    vacancy_id: job.vacancy_id,
+    job_title: job.title,
+    employer: job.employer,
+    name: seeker.name,
+    trade: seeker.detected_trade,
+    score: job.score,
+    distance_km: job.distance_km,
+    skills: [...seeker.skills],
+    missing_skills: [...job.missing_skills],
+    bridge_course: job.bridge_course,
+    status: "pending",
+    reject_reason: null,
+  };
+  saveMockApplications([...applications, application]);
+  return { ...application };
+}
+
+export function mockApplicationsForSeeker(seekerId: number): Candidate[] {
+  return getMockApplications()
+    .filter((application) => application.seeker_id === seekerId)
+    .map((application) => ({ ...application }));
+}
+
+export function mockCandidatesForEmployer(): Candidate[] {
+  return getMockApplications().map((application) => ({ ...application }));
+}
+
+export function mockHireApplication(applicationId: number): Candidate {
+  return updateMockApplication(applicationId, (application) => ({
+    ...application,
+    status: "hired",
+    interview_at: application.interview_at ?? new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+  }));
+}
+
+export function mockRejectApplication(applicationId: number, reason: Candidate["reject_reason"]): Candidate {
+  return updateMockApplication(applicationId, (application) => ({
+    ...application,
+    status: "rejected",
+    reject_reason: reason,
+  }));
+}
+
+function updateMockApplication(applicationId: number, update: (application: Candidate) => Candidate): Candidate {
+  const applications = getMockApplications();
+  const index = applications.findIndex((application) => application.application_id === applicationId);
+  if (index < 0) throw new Error("Unknown application.");
+  const updated = applications.map((application, itemIndex) =>
+    itemIndex === index ? update(application) : application,
+  );
+  saveMockApplications(updated);
+  return { ...updated[index] };
+}
 
 // ---- DSDP export ---------------------------------------------------------------------------------
 

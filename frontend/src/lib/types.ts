@@ -60,15 +60,24 @@ export type RejectReason =
   | "experience"
   | "other";
 
+export type ApplicationStatus = "pending" | "hired" | "rejected";
+
 export type Candidate = {
   application_id: number;
+  seeker_id: number;
+  vacancy_id: number;
+  job_title: string;
+  employer: string;
   name: string;
   trade: string;
   score: number; // 0 to 1
   distance_km: number;
   skills: string[];
-  status: "new" | "rejected";
+  missing_skills: string[];
+  bridge_course?: string | null;
+  status: ApplicationStatus;
   reject_reason?: RejectReason | null;
+  interview_at?: string | null;
 };
 
 export type GapLabel = "shortage" | "balanced" | "surplus";

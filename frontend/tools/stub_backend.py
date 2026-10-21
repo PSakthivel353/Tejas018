@@ -13,6 +13,7 @@ Routes have NO trailing slash on purpose (FastAPI would redirect "/trades/" to a
 absolute URL and bypass the Next.js proxy).
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -20,6 +21,9 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="SkillBridge stub backend")
+SEEKERS = {}
+APPLICATIONS = []
+NEXT_APPLICATION_ID = 1
 
 TRADES = [
     # trade_id, trade, projected_demand, expected_graduates, employers_hiring
@@ -50,7 +54,7 @@ async def upload_cv(file: UploadFile = File(...)):
     if not data.startswith(b"%PDF"):
         raise HTTPException(422, "That file is not a readable PDF.")
     name = (file.filename or "candidate").rsplit(".", 1)[0]
-    return {
+    profile = {
         "seeker_id": 7,
         "name": f"Stub {name}",
         "trade_id": 1,
@@ -58,6 +62,8 @@ async def upload_cv(file: UploadFile = File(...)):
         "skills": ["G-code programming", "Lathe operation"],
         "confidence": 0.91,
     }
+    SEEKERS[profile["seeker_id"]] = profile
+    return profile
 
 
 class MatchRequest(BaseModel):
@@ -111,34 +117,95 @@ def post_vacancy(v: VacancyIn):
     }
 
 
-CANDIDATES = [
-    {"application_id": i, "name": n, "trade": t, "score": s, "distance_km": d, "skills": sk, "status": "new", "reject_reason": None}
-    for i, (n, t, s, d, sk) in enumerate(
-        [
-            ("Stub Arun", "CNC Operation", 0.91, 6.2, ["G-code programming"]),
-            ("Stub Divya", "CNC Operation", 0.84, 14.8, ["Tool offset setting"]),
-            ("Stub Rafi", "Turner", 0.77, 22.5, ["Lathe operation"]),
-        ],
-        start=1,
+class ApplicationIn(BaseModel):
+    seeker_id: int
+    vacancy_id: int
+
+
+@app.post("/applications")
+def submit_application(body: ApplicationIn):
+    global NEXT_APPLICATION_ID
+    seeker_id = body.seeker_id
+    vacancy_id = body.vacancy_id
+    seeker = SEEKERS.get(seeker_id)
+    if not seeker or vacancy_id not in (1, 2):
+        raise HTTPException(400, "Upload a CV and choose an available job before applying.")
+    existing = next(
+        (application for application in APPLICATIONS
+         if application["seeker_id"] == seeker_id and application["vacancy_id"] == vacancy_id),
+        None,
     )
-]
+    if existing:
+        return existing
+
+    job = (
+        {
+            "title": "CNC operator (stub)", "employer": "Stub Works", "score": 0.9,
+            "distance_km": 5.0, "missing_skills": ["Tool offset setting"],
+            "bridge_course": "Tool offset setting, 3 weeks",
+        }
+        if vacancy_id == 1
+        else {
+            "title": "Lathe hand (stub)", "employer": "Far Away Ltd", "score": 0.6,
+            "distance_km": 70.0, "missing_skills": [], "bridge_course": None,
+        }
+    )
+    application = {
+        "application_id": NEXT_APPLICATION_ID,
+        "employer_id": 1,
+        "seeker_id": seeker_id,
+        "vacancy_id": vacancy_id,
+        "job_title": job["title"],
+        "employer": job["employer"],
+        "name": seeker["name"],
+        "trade": seeker["detected_trade"],
+        "score": job["score"],
+        "distance_km": job["distance_km"],
+        "skills": seeker["skills"],
+        "missing_skills": job["missing_skills"],
+        "bridge_course": job["bridge_course"],
+        "status": "pending",
+        "reject_reason": None,
+    }
+    NEXT_APPLICATION_ID += 1
+    APPLICATIONS.append(application)
+    return application
+
+
+@app.get("/seekers/{seeker_id}/applications")
+def seeker_applications(seeker_id: int):
+    return [application for application in APPLICATIONS if application["seeker_id"] == seeker_id]
 
 
 @app.get("/employers/{employer_id}/candidates")
 def candidates(employer_id: int):
-    return CANDIDATES
+    return [application for application in APPLICATIONS if application["employer_id"] == employer_id]
 
 
 class RejectIn(BaseModel):
     reason: Literal["skills_mismatch", "too_far", "salary_expectation", "experience", "other"]
 
 
+@app.patch("/applications/{application_id}/hire")
+def hire(application_id: int):
+    for application in APPLICATIONS:
+        if application["application_id"] == application_id:
+            if application["status"] != "hired":
+                application["status"] = "hired"
+                application["interview_at"] = (
+                    datetime.now(timezone.utc) + timedelta(days=3)
+                ).isoformat()
+            return application
+    raise HTTPException(400, "Unknown application")
+
+
 @app.patch("/applications/{application_id}/reject")
 def reject(application_id: int, body: RejectIn):
-    for c in CANDIDATES:
-        if c["application_id"] == application_id:
-            c["status"], c["reject_reason"] = "rejected", body.reason
-            return c
+    for application in APPLICATIONS:
+        if application["application_id"] == application_id:
+            application["status"], application["reject_reason"] = "rejected", body.reason
+            application["interview_at"] = None
+            return application
     raise HTTPException(400, "Unknown application")  # 400, not 404: 404 means "endpoint missing" to the frontend
 
 
