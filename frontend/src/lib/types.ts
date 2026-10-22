@@ -1,5 +1,18 @@
-// These shapes are the contract with Member 3's FastAPI backend.
-// If the backend returns different field names, change them HERE (and in mock.ts) only.
+// These shapes are the contract between Frontend, RBAC Auth, and Backend API / Supabase.
+
+export type Role = "candidate" | "recruiter" | "admin";
+
+export type User = {
+  id: string; // e.g. "cand101", "rec201", "admin001"
+  name: string;
+  email: string;
+  role: Role;
+  companyName?: string;
+  trade?: string;
+  phone?: string;
+  seeker_id?: number;
+  employer_id?: number;
+};
 
 export type SeekerProfile = {
   seeker_id: number;
@@ -8,6 +21,28 @@ export type SeekerProfile = {
   detected_trade: string;
   skills: string[];
   confidence: number; // 0 to 1
+  phone?: string;
+  email?: string;
+  location?: string;
+  experience?: string;
+  bio?: string;
+  age?: number;
+  qualification?: string;
+};
+
+export type Course = {
+  id: string;
+  title: string;
+  provider: string;
+  trade: string;
+  status: "ongoing" | "completed";
+  progressPct?: number;
+  completedDate?: string;
+  duration: string;
+  certificateId?: string;
+  modulesTotal?: number;
+  modulesDone?: number;
+  badge?: string;
 };
 
 export type JobMatch = {
@@ -22,6 +57,8 @@ export type JobMatch = {
   matched_skills: string[];
   missing_skills: string[];
   bridge_course?: string | null;
+  location?: string;
+  description?: string;
 };
 
 export type MatchRequest = {
@@ -42,6 +79,8 @@ export type VacancyInput = {
   wage_max: number;
   is_formal: boolean;
   location: string;
+  trade?: string;
+  required_skills?: string[];
 };
 
 export type VacancyResult = {
@@ -60,7 +99,14 @@ export type RejectReason =
   | "experience"
   | "other";
 
-export type ApplicationStatus = "pending" | "hired" | "rejected";
+export type ApplicationStatus = "pending" | "interview_scheduled" | "hired" | "rejected";
+
+export type InterviewDetails = {
+  interview_at: string;
+  mode: "in_person" | "video_call" | "phone";
+  location_or_link: string;
+  notes?: string;
+};
 
 export type Candidate = {
   application_id: number;
@@ -77,7 +123,12 @@ export type Candidate = {
   bridge_course?: string | null;
   status: ApplicationStatus;
   reject_reason?: RejectReason | null;
+  reject_feedback?: string | null;
   interview_at?: string | null;
+  interview_mode?: "in_person" | "video_call" | "phone" | null;
+  interview_location?: string | null;
+  interview_notes?: string | null;
+  applied_at?: string;
 };
 
 export type GapLabel = "shortage" | "balanced" | "surplus";
@@ -107,3 +158,19 @@ export type DistrictSummary = {
   employers: number;
   open_vacancies: number;
 };
+
+export type RejectionStat = {
+  reason: RejectReason;
+  label: string;
+  count: number;
+  percentage: number;
+};
+
+export type DistrictAnalytics = {
+  total_applications: number;
+  total_hired: number;
+  total_rejected: number;
+  top_missing_skills: { skill: string; count: number }[];
+  rejection_breakdown: RejectionStat[];
+};
+

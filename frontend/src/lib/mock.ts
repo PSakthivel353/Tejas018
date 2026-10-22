@@ -203,7 +203,7 @@ function getMockApplications(): Candidate[] {
         typeof application.application_id === "number" &&
         typeof application.seeker_id === "number" &&
         typeof application.vacancy_id === "number" &&
-        ["pending", "hired", "rejected"].includes(application.status),
+        ["pending", "interview_scheduled", "hired", "rejected"].includes(application.status),
     )
   ) {
     throw new Error("Saved demo applications could not be read. Clear this tab's session data and try again.");
