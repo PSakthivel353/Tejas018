@@ -1,57 +1,47 @@
-import Link from "next/link";
-import { Building2, ChevronRight, GraduationCap, Landmark } from "lucide-react";
-import { DISTRICT } from "@/lib/mock";
+"use client";
 
-const portals = [
-  {
-    href: "/seeker",
-    icon: GraduationCap,
-    title: "I am looking for work",
-    text: "Upload your CV and see openings near you that fit your trade.",
-  },
-  {
-    href: "/employer",
-    icon: Building2,
-    title: "I am hiring",
-    text: "Post a vacancy and review the candidates matched to it.",
-  },
-  {
-    href: "/officer",
-    icon: Landmark,
-    title: "I plan training for the district",
-    text: "See where demand is growing and which trades need more seats.",
-  },
-];
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import LoginPage from "./login/page";
+import { Skeleton } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
 
 export default function Home() {
-  return (
-    <div className="grid gap-12 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-center lg:gap-20 lg:py-10">
-      <div>
-        <h1 className="text-4xl font-extrabold leading-[1.05] sm:text-6xl">
-          Train for the jobs your district is hiring for.
-        </h1>
-        <p className="mt-6 max-w-md text-lg text-muted">
-          SkillBridge compares what local employers will need with what ITIs teach, so young people find work near
-          home and officers know which courses to grow. Pilot district: {DISTRICT}.
-        </p>
-      </div>
+  const router = useRouter();
+  const { user, isLoading } = useAuth();
 
-      <ul className="divide-y divide-line border-y border-line">
-        {portals.map(({ href, icon: Icon, title, text }) => (
-          <li key={href}>
-            <Link href={href} className="group flex items-center gap-4 px-2 py-5 transition-colors hover:bg-sunken">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
-                <Icon size={22} aria-hidden />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-display text-lg font-semibold">{title}</span>
-                <span className="block text-sm text-muted">{text}</span>
-              </span>
-              <ChevronRight size={20} className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5" aria-hidden />
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+  useEffect(() => {
+    if (!isLoading && user) {
+      if (user.role === "candidate") {
+        router.replace("/seeker");
+      } else if (user.role === "recruiter") {
+        router.replace("/employer");
+      } else if (user.role === "admin") {
+        router.replace("/officer");
+      }
+    }
+  }, [user, isLoading, router]);
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-xl py-16 space-y-4" aria-busy="true" aria-label="Loading session">
+        <Skeleton className="mx-auto h-8 w-48" />
+        <Skeleton className="h-72 w-full" />
+      </div>
+    );
+  }
+
+  // If already logged in, show brief redirecting state while router transitions
+  if (user) {
+    return (
+      <div className="mx-auto max-w-md py-20 text-center">
+        <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+        <p className="font-display text-lg font-semibold">Welcome back, {user.name}!</p>
+        <p className="mt-1 text-xs text-muted">Opening your {user.role} dashboard...</p>
+      </div>
+    );
+  }
+
+  // Starting state (Not logged in): Authentication is displayed right at the start!
+  return <LoginPage />;
 }
